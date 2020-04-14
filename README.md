@@ -12,7 +12,7 @@ In this blogpost we will see how the Consul can be deployed for different scenar
 
 ## In cluster patterns
 
-Briefly speaking Consul KV provides a simple way to store namepaced or hierarchical configurations/properties in any form including string, JSON, YAML and HCL.
+Briefly speaking Consul Key-Value (KV) provides a simple way to store namepaced or hierarchical configurations/properties in any form including string, JSON, YAML and HCL.
 
 A complementary feature for KV is Watches. As the name suggests, it watches (monitor) the values of the keys stored in KV. Watches notify changes occurred in one or more keys. In addition to this, we can also watch services, nodes, events, etc. Once, a notification is received for a configuration change, a Handler is called for an action to the respective notification. Handler can be a executable (can be used to invoke a desired action on reception of notification) or an HTTP endpoint (can be used for health checks). Depending upon this, we can differentiate Consul Deployment patterns within a Kubernetes cluster as following:
 
@@ -20,9 +20,33 @@ A complementary feature for KV is Watches. As the name suggests, it watches (mon
 
 Let us consider an example in which we deploy Consul server using standard helm chart. Consul agent can be deployed as separate deployment with one or more replicas and there is an application which needs to watch a specific configuration in the KV.
 
-![Consul deployment pattern](Consul-blog.png)
+![Consul deployment pattern](consul-dep.png)
 
-With proper configuration of Consul watch and handler, application successfully gets notified on KV changes. Now suppose, there is rise in traffic and the application needs to be scaled. In this scenario, the newly scaled pods may not get the KV change notification. This is due to the fact that application is exposed to the Consul agent via Kubernetes service. Service by default load balances between the pods on round-robin (considering user-space modes) or random (considering iptables mode) basis. Thus, all the running pods may not receive notification at once. The solution to this issue is deploying Consul agent as a daemonset.
+With proper configuration of Consul watch and handler, application successfully gets notified on KV changes. Generally, watches are configured using CLI command `consul watch` or using json file placed in config directory of Consul Agent. A typical watch configuration is as shown below:
+
+```
+{
+   "server":false,
+   "datacenter":"dc",
+   "data_dir":"/consul/data",
+   "log_level":"INFO",
+   "leave_on_terminate":true,
+   "watches":[
+      {
+         "type": "key",
+         "key": "testKey1",
+         "handler_type": "http",
+         "http_handler_config": {
+           "path":"<consul server path>",
+           "method": "POST",
+           "tls_skip_verify": true
+         }
+     }
+   ]
+}
+```
+
+Now suppose, there is rise in traffic and the application needs to be scaled. In this scenario, the newly scaled pods may not get the KV change notification. This is due to the fact that application is exposed to the Consul agent via Kubernetes service. Service by default load balances between the pods on round-robin (considering user-space modes) or random (considering iptables mode) basis. Thus, all the running pods may not receive notification at once. The solution to this issue is deploying Consul agent as a daemonset.
 
 ![Consul app scaled](app-scaled.png)
 
@@ -30,14 +54,16 @@ To summarize, this pattern will be useful for low volume use cases where we just
 
 ### Consul agent as a Daemonset: HTTP handler
 
-In this scenario, we will use the Consul Helm chart to deploy Consul agent as a daemonset. These changes can be incorporated by `client.enabled: true` and adding Consul watch configuration in `client.extraConfig`.
-With the proper configuration, you will see that every application pod receives the Consul notification on KV changes. But still there is twist here. Suppose you want to take a specific action on receiving Consul notification. For this, you need to configure a handler script which will reside in the application pod. This script in the pod won't be accessible to the Consul agent, as daemonset doesn't have access to file-system inside the pod. In this scenario, Consul agent should run as a sidecar in the application pod.
+In this scenario, we will use the Consul Helm chart to deploy Consul agent as a daemonset. These changes can be incorporated by `client.enabled: true` and adding Consul watch configuration in `client.extraConfig` in values.yaml of Helm chart.
+With the proper configuration, you will see that every application pod receives the Consul notification on KV changes. But still there is twist here. Suppose you want to take a specific action on receiving Consul notification. For this, you need to configure a handler script which will reside in the application pod. This script in the pod won't be accessible to the Consul agent, as daemonset doesn't have access to file-system inside the pod.
+
+In some cases, there can be some infrastructure changes and you need to configure watches dynamically. In such cases, Consul agent needs a reload to incorporate new configuration. Hence, it will be impractical to configure watches on the fly, as it will not be a straightforward approach for configuring watches automatically. In such scenarios, Consul agent should run as a sidecar in the application pod.
 
 ![Consul daemonset pattern](consul-ds.png)
 
 ### Consul agent as a sidecar: Executable handler script
 
-In this pattern, Consul agent runs as a sidecar in each pod. Watch is configured on this pod to track changes of the KV and notify subsequently using executable handler. Whenever, the pod terminates or goes down, a new pod is created with same configuration and joins the Consul cluster to tracking the same KV changes again.
+In this pattern, Consul agent runs as a sidecar in each pod. Watch is configured on this pod to track changes of the KV and notify subsequently using executable handler. In this case, handler is pointed to the localhost in contrast to the Daemonset approach where handler is pointed to service endpoint or an IP address. Whenever, the pod terminates or goes down, a new pod is created with same configuration and joins the Consul cluster to tracking the same KV changes again.
 
 ![Consul sidecar pattern](consul-sidecar.png)
 
