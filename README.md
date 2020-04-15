@@ -41,10 +41,23 @@ With proper configuration of Consul watch and handler, application successfully 
            "method": "POST",
            "tls_skip_verify": true
          }
-     }
+      },
+      {
+         "type":"key",
+         "key":"testKey2",
+         "handler_type":"script",
+         "args": ["/scripts/handler.sh"]
+      },
+      {
+         "type":"key",
+         "key":"testKey2",`
+         "handler_type":"script",
+         "args": ["/scripts/handler2"]
+      }
    ]
 }
 ```
+From the above snippet you can see that, multiple watches can be configured at a time. Moreover, you can monitor same KV and and have separate actions by providing different scripts. Script handler also supports `GO` binary.
 
 Now suppose, there is rise in traffic and the application needs to be scaled. In this scenario, the newly scaled pods may not get the KV change notification. This is due to the fact that application is exposed to the Consul agent via Kubernetes service. Service by default load balances between the pods on round-robin (considering user-space modes) or random (considering iptables mode) basis. Thus, all the running pods may not receive notification at once. The solution to this issue is deploying Consul agent as a daemonset.
 
@@ -56,8 +69,6 @@ To summarize, this pattern will be useful for low volume use cases where we just
 
 In this scenario, we will use the Consul Helm chart to deploy Consul agent as a daemonset. These changes can be incorporated by `client.enabled: true` and adding Consul watch configuration in `client.extraConfig` in values.yaml of Helm chart.
 With the proper configuration, you will see that every application pod receives the Consul notification on KV changes. But still there is twist here. Suppose you want to take a specific action on receiving Consul notification. For this, you need to configure a handler script which will reside in the application pod. This script in the pod won't be accessible to the Consul agent, as daemonset doesn't have access to file-system inside the pod.
-
-In some cases, there can be some infrastructure changes and you need to configure watches dynamically. In such cases, Consul agent needs a reload to incorporate new configuration. Hence, it will be impractical to configure watches on the fly, as it will not be a straightforward approach for configuring watches automatically. In such scenarios, Consul agent should run as a sidecar in the application pod.
 
 ![Consul daemonset pattern](consul-ds.png)
 
@@ -91,4 +102,13 @@ Consul service mesh can be implemented by adding following annotations in deploy
 `connect-service-upstreams` specifies the upstreams services that the current application service needs to be connected. Port specified is the static port opened to listen for the respective communication.
 
 ![Consul Connect](svc-mesh.png)
+
+### References
+
+- [Deployment Patterns for Consul in Kubernetes](https://www.youtube.com/watch?v=-aTJ9uLJXHA&t=851s)
+- https://github.com/infracloudio/consul-kubernetes-patterns
+- https://www.consul.io/docs/agent/watches.html
+- https://www.consul.io/docs/platform/k8s/service-sync.html
+- https://www.consul.io/docs/connect/index.html
+- https://github.com/hashicorp/consul-helm
 
